@@ -423,7 +423,6 @@ warn_unused_configs = true
 Include comprehensive documentation:
 
 - **README.md** with installation, usage, and examples
-- **CHANGELOG.md** for version history
 - **LICENSE** file
 
 
