@@ -1,0 +1,8 @@
+black>=22.0.0
+flake8>=4.0.0
+mypy>=0.950
+isort>=5.10.0
+coverage>=6.0.0
+jupyter>=1.0.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
