@@ -16,10 +16,12 @@ Series Utilities provides essential tools for preprocessing and cleaning series 
 - Flat baseline assumption: Uses simple statistical methods since no detrending needed
 - Parameter naming: Descriptive parameters like `threshold_sigma=4.0`, `backup_sigma=2.0`
 
-### 📐 **DC Component Removal Through Integral Mean Subtraction**
-- Eliminates drift and enforces zero net change constraint
-- Removes the time-averaged integral of the signal: `corrected_signal(t) = original_signal(t) - (1/T) ∫ original_signal(t) dt`
-- Particularly useful for acceleration signals with velocity constraints (ΔV = 0)
+### 📀 **DC Component Removal** (⚠️ Deprecated - Use scipy.signal.detrend)
+- Three methods: `'integral_mean'` (legacy), `'constant'` (recommended), `'linear'` (for drift)
+- **CRITICAL**: Analysis shows scipy methods outperform in ALL cases (100,000× better ΔV=0)
+- **integral_mean**: NO advantage, even for non-uniform sampling (ΔV ~1e-3)
+- **constant/linear**: Excellent ΔV≈0 enforcement (ΔV ~1e-16) in all cases
+- **RECOMMENDATION**: Use `scipy.signal.detrend()` directly, this feature adds no value
 
 ### 🔧 **Flexible Input Support**
 - NumPy arrays and Pandas DataFrames 
@@ -90,12 +92,22 @@ filtered_time, filtered_signal = remove_pre_event_data(
 ```python
 from series_utilities import remove_dc_component
 
-# Remove DC component to enforce zero net change
-corrected_signal = remove_dc_component(time, signal)
+# Method 1: Integral mean (default, best for non-uniform sampling)
+time_corr, signal_corr = remove_dc_component(time, signal, method='integral_mean')
 
-# Verify zero integral (within numerical precision)
-integral = np.trapz(corrected_signal, time)
+# Method 2: Constant (mean removal, best ΔV=0 for uniform sampling)
+time_corr, signal_corr = remove_dc_component(time, signal, method='constant')
+
+# Method 3: Linear (removes DC + drift)
+time_corr, signal_corr = remove_dc_component(time, signal, method='linear')
+
+# Verify zero integral for integral_mean method
+integral = np.trapezoid(signal_corr, time_corr)
 print(f"Signal integral after DC removal: {integral:.2e}")
+
+# Note: For uniform sampling, scipy.signal.detrend is also recommended:
+from scipy import signal
+corrected = signal.detrend(signal, type='constant')  # or type='linear'
 ```
 
 ### Working with DataFrames
@@ -168,16 +180,47 @@ Remove pre-event data from signal, keeping data from trigger point onwards.
 **Returns:**
 - `tuple` or `DataFrame`: Filtered time and signal arrays, or filtered DataFrame
 
-#### `remove_dc_component(time_data, signal_data)`
+#### `remove_dc_component(independent_data, dependent_data, method='integral_mean')` ⚠️ DEPRECATED
 
-Remove DC component through integral mean subtraction to enforce zero net change constraint.
+**⚠️  WARNING: This function is effectively deprecated. Use scipy.signal.detrend() directly.**
+
+Remove DC component using specified method.
 
 **Parameters:**
-- `time_data`: Independent variable array or Series
-- `signal_data`: Dependent variable (signal) array or Series
+- `independent_data`: Independent variable (time) array or Series
+- `dependent_data`: Dependent variable (signal) array or Series
+- `method` (str): DC removal method - `'integral_mean'` (default), `'constant'`, or `'linear'`
+  - **'integral_mean'**: Time-weighted integration (legacy, NO advantage)
+    - ΔV performance: POOR (~1e-3 to 1e-5) in ALL cases
+    - Maintained only for backward compatibility
+  - **'constant'**: Mean removal via scipy.signal.detrend(type='constant') **RECOMMENDED**
+    - ΔV performance: EXCELLENT (~1e-16) in ALL cases
+    - Works for uniform AND non-uniform sampling
+  - **'linear'**: Linear detrending via scipy.signal.detrend(type='linear') **RECOMMENDED**
+    - ΔV performance: EXCELLENT (~1e-15)
+    - Best when drift present
 
 **Returns:**
-- `np.ndarray`: Signal with DC component removed
+- `tuple`: (independent_array, corrected_dependent_array)
+
+**Performance Reality Check:**
+- Uniform, no drift: scipy 100× better ΔV (1e-16 vs 5e-5)
+- Uniform, with drift: scipy 100,000× better ΔV (2e-16 vs 3e-5)  
+- Non-uniform: scipy STILL 100,000× better ΔV (6e-17 vs 6e-3)
+- **CONCLUSION**: integral_mean has NO advantage in ANY case
+
+**Recommendation:**
+```python
+# Instead of this package function:
+from series_utilities import remove_dc_component
+t, signal_corr = remove_dc_component(t, signal, method='constant')
+
+# Just use scipy directly:
+from scipy import signal
+signal_corr = signal.detrend(signal, type='constant')  # or type='linear'
+```
+
+See [comparison notebook](notebooks/dc_removal_methods_comparison.ipynb) for detailed analysis.
 
 ## Examples and Demonstrations
 

@@ -360,7 +360,7 @@ class TestFlexibleInputIntegration(unittest.TestCase):
         for name, (time_data, signal_data) in self.formats.items():
             if name != "dataframe":  # Skip DataFrame for this function
                 with self.subTest(format=name):
-                    _, corrected = remove_dc_component(time_data, signal_data)
+                    _, corrected = remove_dc_component(time_data, signal_data, method='integral_mean')
                     # Check that integral is approximately zero
                     integral = np.trapezoid(corrected, self.time_data)
                     results[name] = integral

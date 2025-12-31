@@ -94,7 +94,7 @@ class TestDCComponentRemoval(unittest.TestCase):
     def test_remove_dc_component_sine_wave_with_dc(self) -> None:
         """Test DC removal on sine wave with DC offset - should preserve AC, remove DC."""
         corrected_time, corrected_signal = remove_dc_component(
-            self.time_uniform, self.sine_with_dc
+            self.time_uniform, self.sine_with_dc, method='integral_mean'
         )
 
         # The corrected signal should be the pure sine wave (DC removed)
@@ -112,7 +112,7 @@ class TestDCComponentRemoval(unittest.TestCase):
     def test_remove_dc_component_zero_net_change_verification(self) -> None:
         """Test that DC removal enforces zero net change (integral = 0)."""
         corrected_time, corrected_signal = remove_dc_component(
-            self.time_uniform, self.shock_with_dc
+            self.time_uniform, self.shock_with_dc, method='integral_mean'
         )
 
         # Calculate integral using trapezoidal rule
@@ -130,7 +130,7 @@ class TestDCComponentRemoval(unittest.TestCase):
         """Test that the implementation matches the mathematical formula."""
         # Test with shock signal
         corrected_time, corrected_signal = remove_dc_component(
-            self.time_uniform, self.shock_with_dc
+            self.time_uniform, self.shock_with_dc, method='integral_mean'
         )
 
         # Calculate the integral mean manually
@@ -152,7 +152,7 @@ class TestDCComponentRemoval(unittest.TestCase):
     def test_remove_dc_component_nonuniform_time_spacing(self) -> None:
         """Test DC removal with non-uniform time spacing."""
         corrected_time, corrected_signal = remove_dc_component(
-            self.time_nonuniform, self.signal_nonuniform
+            self.time_nonuniform, self.signal_nonuniform, method='integral_mean'
         )
 
         # Verify zero net change even with irregular spacing
@@ -195,7 +195,7 @@ class TestDCComponentRemoval(unittest.TestCase):
         zero_mean_signal = np.sin(2 * np.pi * self.time_uniform)
 
         corrected_time, corrected_signal = remove_dc_component(
-            self.time_uniform, zero_mean_signal
+            self.time_uniform, zero_mean_signal, method='integral_mean'
         )
 
         # Should remain essentially unchanged
@@ -223,7 +223,7 @@ class TestDCComponentRemoval(unittest.TestCase):
 
         # Remove DC component
         corrected_time, corrected_acceleration = remove_dc_component(
-            self.time_uniform, acceleration_with_drift
+            self.time_uniform, acceleration_with_drift, method='integral_mean'
         )
 
         # Integrate corrected acceleration to get velocity
@@ -257,7 +257,7 @@ class TestDCComponentRemovalWithPandas(unittest.TestCase):
     def test_remove_dc_component_with_pandas_series(self) -> None:
         """Test DC removal with pandas Series input."""
         corrected_time, corrected_signal = remove_dc_component(
-            self.df["time"], self.df["acceleration"]
+            self.df["time"], self.df["acceleration"], method='integral_mean'
         )
 
         # Should work with Series input
@@ -275,7 +275,7 @@ class TestDCComponentRemovalWithPandas(unittest.TestCase):
         signal_data = self.df["acceleration"]
 
         # Apply DC removal
-        corrected_time, corrected_signal = remove_dc_component(time_data, signal_data)
+        corrected_time, corrected_signal = remove_dc_component(time_data, signal_data, method='integral_mean')
 
         # Create new DataFrame with corrected data
         corrected_df = self.df.copy()
@@ -344,6 +344,147 @@ class TestDCComponentRemovalNumericalStability(unittest.TestCase):
                     places=8,
                     msg=f"Should handle extreme DC value {dc_value}",
                 )
+
+
+class TestDCRemovalMethods(unittest.TestCase):
+    """Test cases for different DC removal methods."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        # Uniform sampling
+        self.t_uniform = np.linspace(0, 1.0, 1000)
+        
+        # Non-uniform sampling
+        self.t_nonuniform = np.concatenate([
+            np.linspace(0, 0.3, 300),
+            np.linspace(0.3, 0.5, 400),
+            np.linspace(0.5, 1.0, 300)
+        ])
+        
+        # Test signal: damped sinusoid
+        def make_signal(t, dc=2.0, drift=0.0):
+            return dc + drift * t + 3.0 * np.exp(-2*t) * np.sin(2*np.pi*10*t)
+        
+        self.signal_uniform_dc = make_signal(self.t_uniform, dc=2.0, drift=0.0)
+        self.signal_uniform_drift = make_signal(self.t_uniform, dc=2.0, drift=1.5)
+        self.signal_nonuniform = make_signal(self.t_nonuniform, dc=2.0, drift=0.0)
+
+    def test_method_parameter_validation(self) -> None:
+        """Test that invalid method parameter raises ValueError."""
+        with self.assertRaises(ValueError) as context:
+            remove_dc_component(self.t_uniform, self.signal_uniform_dc, method='invalid')
+        self.assertIn("Invalid method", str(context.exception))
+
+    def test_integral_mean_method_uniform_sampling(self) -> None:
+        """Test integral_mean method with uniform sampling (default behavior)."""
+        _, corrected = remove_dc_component(
+            self.t_uniform, self.signal_uniform_dc, method='integral_mean'
+        )
+        # integral_mean enforces integral=0, not mean=0
+        integral = np.trapezoid(corrected, self.t_uniform)
+        self.assertAlmostEqual(integral, 0.0, places=10)
+
+    def test_constant_method_uniform_sampling(self) -> None:
+        """Test constant method (scipy detrend) with uniform sampling."""
+        _, corrected = remove_dc_component(
+            self.t_uniform, self.signal_uniform_dc, method='constant'
+        )
+        # Should remove DC component (mean should be ~0)
+        self.assertAlmostEqual(np.mean(corrected), 0.0, places=10)
+
+    def test_linear_method_removes_drift(self) -> None:
+        """Test that linear method removes both DC and linear drift."""
+        _, corrected = remove_dc_component(
+            self.t_uniform, self.signal_uniform_drift, method='linear'
+        )
+        # Should remove both DC and drift
+        self.assertAlmostEqual(np.mean(corrected), 0.0, places=10)
+        
+        # Check that linear trend is removed (fit line should have ~0 slope)
+        coeffs = np.polyfit(self.t_uniform, corrected, 1)
+        self.assertAlmostEqual(coeffs[0], 0.0, places=10)  # slope ≈ 0
+
+    def test_delta_v_constraint_constant_method(self) -> None:
+        """Test that constant method achieves excellent ΔV≈0 even with drift."""
+        _, corrected = remove_dc_component(
+            self.t_uniform, self.signal_uniform_drift, method='constant'
+        )
+        
+        # Calculate ΔV (cumulative integral)
+        dt = np.mean(np.diff(self.t_uniform))
+        velocity = np.cumsum(corrected) * dt
+        delta_v = velocity[-1]
+        
+        # Should achieve ΔV very close to zero (< 1e-10)
+        self.assertLess(abs(delta_v), 1e-10)
+
+    def test_delta_v_constraint_linear_method(self) -> None:
+        """Test that linear method achieves excellent ΔV≈0 with drift."""
+        _, corrected = remove_dc_component(
+            self.t_uniform, self.signal_uniform_drift, method='linear'
+        )
+        
+        # Calculate ΔV
+        dt = np.mean(np.diff(self.t_uniform))
+        velocity = np.cumsum(corrected) * dt
+        delta_v = velocity[-1]
+        
+        # Should achieve ΔV very close to zero
+        self.assertLess(abs(delta_v), 1e-10)
+
+    def test_methods_converge_no_drift(self) -> None:
+        """Test that all methods give similar results with no drift."""
+        _, corrected_integral = remove_dc_component(
+            self.t_uniform, self.signal_uniform_dc, method='integral_mean'
+        )
+        _, corrected_constant = remove_dc_component(
+            self.t_uniform, self.signal_uniform_dc, method='constant'
+        )
+        _, corrected_linear = remove_dc_component(
+            self.t_uniform, self.signal_uniform_dc, method='linear'
+        )
+        
+        # integral_mean and constant should be close (both remove offset)
+        # Note: integral_mean subtracts integral mean, constant subtracts arithmetic mean
+        np.testing.assert_allclose(corrected_integral, corrected_constant, atol=1e-3)
+        
+        # linear method additionally fits/removes a line, so results differ more
+        # but all should have similar characteristics (zero-ish mean)
+        self.assertAlmostEqual(np.mean(corrected_constant), 0.0, places=10)
+        self.assertAlmostEqual(np.mean(corrected_linear), 0.0, places=10)
+
+    def test_integral_mean_nonuniform_sampling(self) -> None:
+        """Test that integral_mean handles non-uniform sampling correctly."""
+        _, corrected = remove_dc_component(
+            self.t_nonuniform, self.signal_nonuniform, method='integral_mean'
+        )
+        
+        # Should still remove DC component
+        # Check via integral (time-weighted)
+        integral = np.trapezoid(corrected, self.t_nonuniform)
+        self.assertAlmostEqual(integral, 0.0, places=10)
+
+    def test_default_method_is_linear(self) -> None:
+        """Test that default method is linear (most robust choice)."""
+        _, corrected_default = remove_dc_component(
+            self.t_uniform, self.signal_uniform_dc
+        )
+        _, corrected_explicit = remove_dc_component(
+            self.t_uniform, self.signal_uniform_dc, method='linear'
+        )
+        
+        # Should be identical
+        np.testing.assert_array_equal(corrected_default, corrected_explicit)
+
+    def test_method_parameter_with_pandas(self) -> None:
+        """Test that method parameter works with pandas input."""
+        t_series = pd.Series(self.t_uniform)
+        signal_series = pd.Series(self.signal_uniform_dc)
+        
+        for method in ['integral_mean', 'constant', 'linear']:
+            _, corrected = remove_dc_component(t_series, signal_series, method=method)
+            self.assertIsInstance(corrected, np.ndarray)
+            self.assertEqual(len(corrected), len(t_series))
 
 
 if __name__ == "__main__":
