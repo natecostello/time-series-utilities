@@ -48,9 +48,9 @@ pip install -r requirements-dev.txt
 
 ### Requirements
 - Python 3.8+
-- NumPy ≥ 1.20.0
-- Pandas ≥ 1.3.0
-- SciPy ≥ 1.7.0
+- NumPy ≥ 2.0.0
+- Pandas ≥ 2.0.0
+- SciPy ≥ 1.10.0
 
 ## Quick Start
 

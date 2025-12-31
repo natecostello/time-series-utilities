@@ -10,7 +10,7 @@ This package provides tools for:
 - Flexible input support for NumPy arrays and Pandas DataFrames
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Your Name"
 __email__ = "your.email@example.com"
 
